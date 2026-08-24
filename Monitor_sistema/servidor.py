@@ -4,9 +4,9 @@ import threading
 import psutil
 import time
 
-monitor_ligado = {"cpu": False, "memoria": False} #variáveis compartilhadas entre as threads
+monitor_ligado = {"cpu": False, "memoria": False}
 
-lock_envio = threading.Lock() #criação do mutex (pra gerar uma seção crítica)
+lock_envio = threading.Lock()
 
 def enviar(conexao, texto):
     lock_envio.acquire() 
@@ -28,7 +28,7 @@ def thread_memoria(conexao, intervalo):
 
     print("Thread de MEMORIA finalizada")
 
-def thread_leitura(conexao): # loop infinito pra monitorar oq o cliente esta digitando
+def thread_leitura(conexao):
     while True:
         dados = conexao.recv(1024).decode()  
         if not dados:
