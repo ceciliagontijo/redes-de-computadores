@@ -3,8 +3,11 @@ from datetime import datetime
 import threading
 import psutil
 import time
+import sys
 
-monitor_ligado = {"cpu": False, "memoria": False}
+clientes_conectados = 0
+
+lock_cont = threading.Lock()
 
 lock_envio = threading.Lock()
 
@@ -13,14 +16,14 @@ def enviar(conexao, texto):
     conexao.send(texto.encode())
     lock_envio.release()
 
-def thread_cpu(conexao, intervalo):
+def thread_cpu(conexao, intervalo, monitor_ligado):
     while monitor_ligado["cpu"]:
         uso = psutil.cpu_percent(interval=1)
         enviar(conexao, f"[CPU] uso atual: {uso}%\n")
         time.sleep(intervalo)
     print("Thread de CPU finalizada.")
 
-def thread_memoria(conexao, intervalo):
+def thread_memoria(conexao, intervalo, monitor_ligado):
     while monitor_ligado["memoria"]:
         uso = psutil.virtual_memory().percent
         enviar(conexao, f"[MEMORIA] uso atual: {uso}%\n")
@@ -28,7 +31,7 @@ def thread_memoria(conexao, intervalo):
 
     print("Thread de MEMORIA finalizada")
 
-def thread_leitura(conexao):
+def thread_leitura(conexao, monitor_ligado):
     while True:
         dados = conexao.recv(1024).decode()  
         if not dados:
@@ -55,7 +58,7 @@ def thread_leitura(conexao):
             intervalo = int(comando.split("-")[1])
             if not monitor_ligado["cpu"]:
                 monitor_ligado["cpu"] = True
-                t = threading.Thread(target=thread_cpu, args=(conexao, intervalo))
+                t = threading.Thread(target=thread_cpu, args=(conexao, intervalo, monitor_ligado))
                 t.daemon = True
                 t.start()
             enviar(conexao, f"Monitor de CPU iniciado a cada {intervalo}s.\n")  
@@ -64,7 +67,7 @@ def thread_leitura(conexao):
             intervalo = int(comando.split("-")[1])
             if not monitor_ligado["memoria"]:
                 monitor_ligado["memoria"]  = True
-                t = threading.Thread(target=thread_memoria, args=(conexao, intervalo))
+                t = threading.Thread(target=thread_memoria, args=(conexao, intervalo, monitor_ligado))
                 t.daemon = True
                 t.start()
             enviar(conexao, f"Monitor de MEMORIA iniciado a cada {intervalo}s.\n")
@@ -74,30 +77,54 @@ def thread_leitura(conexao):
             enviar(conexao, f"Comando nao reconhecido: {comando}\n")
 
 
+def atender_cliente(conexao, limite_clientes):
+
+        global clientes_conectados
+
+        with lock_cont:
+            if clientes_conectados >= limite_clientes:
+                conexao.send("Não foi possível conectar, limite de clientes atingido\n".encode())
+                conexao.close()
+                return 
+            clientes_conectados += 1
+        
+
+        monitor_ligado = {"cpu": False, "memoria": False}
+
+        horario = datetime.now().strftime("%H:%M:%S")
+        menu = (
+            f"{horario}: CONECTADO!!\n"
+            "Monitores disponíveis:\n"
+            "  CPU-<segundos>\n"
+            "  memoria-<segundos>\n"
+            "  quit-<monitor>\n"
+            "  exit\n"
+        )
+        conexao.send(menu.encode()) 
+
+        thread_leitura(conexao, monitor_ligado) 
+
+        with lock_cont:
+            clientes_conectados -= 1
+
+        conexao.close()
+
+
 def main():
+    limite_clientes = int(sys.argv[1])
 
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     servidor.bind(('', 5000))
     servidor.listen()
 
-    conexao, endereco = servidor.accept()
-    print(f"Cliente conectado: {endereco}")
-    
-    horario = datetime.now().strftime("%H:%M:%S")
-    menu = (
-        f"{horario}: CONECTADO!!\n"
-        "Monitores disponíveis:\n"
-        "  CPU-<segundos>\n"
-        "  memoria-<segundos>\n"
-        "  quit-<monitor>\n"
-        "  exit\n"
-    )
-    conexao.send(menu.encode()) 
-
-    thread_leitura(conexao) 
-    
-    conexao.close()
-    servidor.close()
+    while True:
+        conexao, endereco = servidor.accept()
+        print(f"Cliente conectado: {endereco}")
+        t = threading.Thread(target=atender_cliente, args=(conexao, limite_clientes))
+        t.daemon = True
+        t.start()
+   
 
 if __name__ == "__main__":
     main()
