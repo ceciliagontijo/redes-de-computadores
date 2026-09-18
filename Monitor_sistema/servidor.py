@@ -12,16 +12,22 @@ lock_cont = threading.Lock()
 lock_envio = threading.Lock()
 
 def enviar(conexao, texto):
-    lock_envio.acquire() 
-    conexao.send(texto.encode())
-    lock_envio.release()
+    lock_envio.acquire()
+    try:
+        conexao.send(texto.encode())
+        return True
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return False
+    finally:
+        lock_envio.release()
 
 def thread_cpu(conexao, intervalo, monitor_ligado):
     while monitor_ligado["cpu"]:
         uso = psutil.cpu_percent(interval=1)
-        enviar(conexao, f"[CPU] uso atual: {uso}%\n")
+        if not enviar(conexao, f"[CPU] uso atual: {uso}%\n"):
+            monitor_ligado["cpu"] = False
+            break
         time.sleep(intervalo)
-    print("Thread de CPU finalizada.")
 
 def thread_memoria(conexao, intervalo, monitor_ligado):
     while monitor_ligado["memoria"]:
@@ -33,7 +39,12 @@ def thread_memoria(conexao, intervalo, monitor_ligado):
 
 def thread_leitura(conexao, monitor_ligado):
     while True:
-        dados = conexao.recv(1024).decode()  
+        try:
+            dados = conexao.recv(1024).decode()
+        except (ConnectionResetError, ConnectionAbortedError, OSError):
+            print("Cliente desconectou sem aviso")
+            break
+
         if not dados:
             print("Cliente desconectou")
             break
@@ -76,8 +87,11 @@ def thread_leitura(conexao, monitor_ligado):
         else:
             enviar(conexao, f"Comando nao reconhecido: {comando}\n")
 
+        monitor_ligado["cpu"] = False
+        monitor_ligado["memoria"] = False
 
-def atender_cliente(conexao, limite_clientes):
+
+def atender_cliente(conexao, limite_clientes): #mudar
 
         global clientes_conectados
 
@@ -91,23 +105,36 @@ def atender_cliente(conexao, limite_clientes):
 
         monitor_ligado = {"cpu": False, "memoria": False}
 
-        horario = datetime.now().strftime("%H:%M:%S")
-        menu = (
-            f"{horario}: CONECTADO!!\n"
-            "Monitores disponíveis:\n"
-            "  CPU-<segundos>\n"
-            "  memoria-<segundos>\n"
-            "  quit-<monitor>\n"
-            "  exit\n"
-        )
-        conexao.send(menu.encode()) 
+        try:
+            horario = datetime.now().strftime("%H:%M:%S")
+            menu = (
+                f"{horario}: CONECTADO!!\n"
+                "Monitores disponíveis:\n"
+                "  CPU-<segundos>\n"
+                "  memoria-<segundos>\n"
+                "  quit-<monitor>\n"
+                "  exit\n"
+            )
+            conexao.send(menu.encode())
 
-        thread_leitura(conexao, monitor_ligado) 
+            thread_leitura(conexao, monitor_ligado)
 
-        with lock_cont:
-            clientes_conectados -= 1
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as e:
+            print("Erro de conexão:", {e})
 
-        conexao.close()
+        finally:
+            monitor_ligado["cpu"] = False
+            monitor_ligado["memoria"] = False
+
+            with lock_cont:
+                clientes_conectados -= 1
+
+            try:
+                conexao.close()
+            except OSError:
+                pass
+
+            print("Conexão encerrada. Clientes conectados:", {clientes_conectados})
 
 
 def main():
@@ -119,12 +146,19 @@ def main():
     servidor.listen()
 
     while True:
-        conexao, endereco = servidor.accept()
+        try:
+            conexao, endereco = servidor.accept()
+        except OSError as e:
+            print("Erro ao aceitar conexão:", {e})
+            continue
+
         print(f"Cliente conectado: {endereco}")
         t = threading.Thread(target=atender_cliente, args=(conexao, limite_clientes))
         t.daemon = True
         t.start()
-   
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nServidor encerrado pelo usuário.")
