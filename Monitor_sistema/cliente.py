@@ -45,15 +45,15 @@ def main():
 
     try:
         cliente.connect(("127.0.0.1", 5000))
-    except (ConnectionRefusedError, TimeoutError, OSError):
-        print("Não foi possível conectar ao servidor: {e}")
+    except (ConnectionRefusedError, TimeoutError, OSError) as e:
+        print(f"Não foi possível conectar ao servidor: {e}")
         return
 
     try:
         msg1 = cliente.recv(1024).decode()
         print(msg1)
     except OSError as e:
-        print("Erro ao receber mensagem do servidor:", {e})
+        print(f"Erro ao receber mensagem do servidor: {e}")
         cliente.close()
         return
     

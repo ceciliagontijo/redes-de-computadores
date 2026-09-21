@@ -22,6 +22,7 @@ def enviar(conexao, texto):
         lock_envio.release()
 
 def thread_cpu(conexao, intervalo, monitor_ligado):
+    uso = psutil.cpu_percent(interval=None)
     while monitor_ligado["cpu"]:
         uso = psutil.cpu_percent(interval=1)
         if not enviar(conexao, f"[CPU] uso atual: {uso}%\n"):
@@ -87,9 +88,6 @@ def thread_leitura(conexao, monitor_ligado):
         else:
             enviar(conexao, f"Comando nao reconhecido: {comando}\n")
 
-        monitor_ligado["cpu"] = False
-        monitor_ligado["memoria"] = False
-
 
 def atender_cliente(conexao, limite_clientes): #mudar
 
@@ -120,7 +118,7 @@ def atender_cliente(conexao, limite_clientes): #mudar
             thread_leitura(conexao, monitor_ligado)
 
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as e:
-            print("Erro de conexão:", {e})
+            print(f"Erro de conexão: {e}")
 
         finally:
             monitor_ligado["cpu"] = False
